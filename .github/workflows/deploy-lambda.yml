@@ -5,21 +5,25 @@ on:
     branches:
       - main
     paths:
-      - 'lambdas/go/*'  # Solo activa cuando haya cambios en el código de las lambdas
+      - 'lambda/go/**'
   workflow_dispatch:
     inputs:
       lambda_path:
         description: 'Ruta de la Lambda a construir'
         required: true
-        default: 'lambdas/go/lambda1'  # Ruta predeterminada para la Lambda
+        default: 'lambda/go/lambda1-aws-lambda'
       go_version:
         description: 'Versión de Go a usar'
         required: true
-        default: '1.24'  # Versión predeterminada de Go
+        default: '1.24'
+
+env:
+  LAMBDA_PATH: ${{ github.event.inputs.lambda_path || 'lambda/go/lambda1-aws-lambda' }}
 
 jobs:
   deploy_lambda:
     runs-on: ubuntu-latest
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v2
@@ -27,32 +31,46 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v2
         with:
-          go-version: ${{ github.event.inputs.go_version }}
+          go-version: ${{ github.event.inputs.go_version || '1.24' }}
 
-      - name: Validate Lambda name
+      - name: Validar nombre de Lambda
         run: |
-          lambda_path="${{ github.event.inputs.lambda_path }}"
-          if [[ ! "$lambda_path" =~ -aws-lambda$ ]]; then
-            echo "Error: La ruta de la Lambda debe terminar con '-aws-lambda'. Ruta proporcionada: $lambda_path"
+          if [[ ! "$LAMBDA_PATH" =~ -aws-lambda$ ]]; then
+            echo "Error: La ruta de la Lambda debe terminar con '-aws-lambda'. Ruta: $LAMBDA_PATH"
             exit 1
           fi
-          echo "Ruta de Lambda válida: $lambda_path"
+          echo "Ruta de Lambda válida: $LAMBDA_PATH"
 
-      - name: Build Lambda function
+      - name: Validar existencia de main.go
         run: |
-          cd ${{ github.event.inputs.lambda_path }}
+          if [ ! -f "$LAMBDA_PATH/cmd/main.go" ]; then
+            echo "No se encontró main.go en $LAMBDA_PATH"
+            exit 1
+          fi
+
+      - name: Obtener nombre base de la Lambda
+        id: extract_name
+        run: |
+          name=$(basename "$LAMBDA_PATH" | sed 's/-aws-lambda//')
+          echo "lambda_name=$name" >> $GITHUB_OUTPUT
+
+      - name: Build Lambda
+        run: |
+          cd $LAMBDA_PATH
           GOOS=linux GOARCH=amd64 go build -o main .
-
-      - name: Zip Lambda package
-        run: |
-          cd ${{ github.event.inputs.lambda_path }}
           zip function.zip main
 
-      - name: Deploy Lambda to AWS
+      - name: Mover ZIP a carpeta Terraform
         run: |
-          cd ${{ github.event.inputs.lambda_path }}
-          terraform init
-          terraform apply -auto-approve
+          lambda_name="${{ steps.extract_name.outputs.lambda_name }}"
+          cp "$LAMBDA_PATH/function.zip" "terraform/lambda/$lambda_name/function.zip"
+
+      - name: Deploy con Terragrunt
+        run: |
+          lambda_name="${{ steps.extract_name.outputs.lambda_name }}"
+          cd terragrunt/lambda/$lambda_name
+          terragrunt init
+          terragrunt apply -auto-approve
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}

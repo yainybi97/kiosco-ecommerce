@@ -1,0 +1,4 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project version="4">
+  <component name="TerraformProjectSettings" ignoredTemplateCandidatePaths="[file:///home/yainybi/UnivBelgrano/ecommerce-kiosco/kiosco-ecommerce/terraform/lambda/get-products-lambda-aws/policies/get_products_policy.tpl]" />
+</project>
